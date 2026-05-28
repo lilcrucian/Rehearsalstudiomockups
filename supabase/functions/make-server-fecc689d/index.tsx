@@ -27,6 +27,68 @@ app.get("/make-server-fecc689d/health", (c) => {
   return c.json({ status: "ok", database: "postgresql" });
 });
 
+// ============= AVATAR ENDPOINTS =============
+
+const AVATAR_BUCKET = "make-fecc689d-avatars";
+
+async function ensureAvatarBucket() {
+  const supabase = db.getSupabaseClient();
+  const { data: buckets } = await supabase.storage.listBuckets();
+  if (!buckets?.some(b => b.name === AVATAR_BUCKET)) {
+    await supabase.storage.createBucket(AVATAR_BUCKET, { public: false });
+  }
+}
+ensureAvatarBucket().catch(console.error);
+
+// Upload avatar (base64 JSON body)
+app.post("/make-server-fecc689d/users/:id/avatar", async (c) => {
+  try {
+    const userId = c.req.param("id");
+    const { base64, mimeType } = await c.req.json();
+    if (!base64 || !mimeType) return c.json({ error: "base64 и mimeType обязательны" }, 400);
+
+    const binary = Uint8Array.from(atob(base64), ch => ch.charCodeAt(0));
+    const ext = mimeType === "image/png" ? "png" : "jpg";
+    const path = `${userId}/avatar.${ext}`;
+
+    const supabase = db.getSupabaseClient();
+    const { error: upErr } = await supabase.storage
+      .from(AVATAR_BUCKET)
+      .upload(path, binary, { contentType: mimeType, upsert: true });
+
+    if (upErr) throw new Error(upErr.message);
+
+    const { data } = await supabase.storage
+      .from(AVATAR_BUCKET)
+      .createSignedUrl(path, 60 * 60 * 24 * 7); // 7 days
+
+    return c.json({ url: data?.signedUrl ?? "" });
+  } catch (error: any) {
+    console.error("Avatar upload error:", error);
+    return c.json({ error: error?.message || "Ошибка загрузки аватара" }, 500);
+  }
+});
+
+// Get avatar signed URL
+app.get("/make-server-fecc689d/users/:id/avatar", async (c) => {
+  try {
+    const userId = c.req.param("id");
+    const supabase = db.getSupabaseClient();
+
+    for (const ext of ["jpg", "png"]) {
+      const path = `${userId}/avatar.${ext}`;
+      const { data } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .createSignedUrl(path, 60 * 60 * 24 * 7);
+      if (data?.signedUrl) return c.json({ url: data.signedUrl });
+    }
+
+    return c.json({ url: null });
+  } catch (error: any) {
+    return c.json({ url: null });
+  }
+});
+
 // ============= AUTH ENDPOINTS =============
 
 app.post("/make-server-fecc689d/auth/register", async (c) => {
@@ -46,6 +108,7 @@ app.post("/make-server-fecc689d/auth/register", async (c) => {
       email: user.email,
       name: user.name,
       phone: user.phone,
+      role: user.role,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     });
@@ -64,17 +127,34 @@ app.post("/make-server-fecc689d/auth/login", async (c) => {
       return c.json({ error: "Неверный email или пароль" }, 401);
     }
 
+    console.log(`[login] user ${user.email} role=${user.role}`);
+
     return c.json({
       id: user.id,
       email: user.email,
       name: user.name,
       phone: user.phone,
+      role: user.role,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     });
   } catch (error: any) {
     console.error("Login error:", error);
     return c.json({ error: error?.message || "Ошибка при входе" }, 500);
+  }
+});
+
+// ============= AUTH ME ENDPOINT =============
+
+app.get("/make-server-fecc689d/auth/me/:id", async (c) => {
+  try {
+    const userId = c.req.param("id");
+    const user = await db.getUserById(userId);
+    if (!user) return c.json({ error: "Пользователь не найден" }, 404);
+    console.log(`[auth/me] user ${user.email} role=${user.role}`);
+    return c.json({ id: user.id, email: user.email, name: user.name, phone: user.phone, role: user.role });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Ошибка" }, 500);
   }
 });
 
@@ -94,6 +174,7 @@ app.get("/make-server-fecc689d/users/:id", async (c) => {
       email: user.email,
       name: user.name,
       phone: user.phone,
+      role: user.role,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     });
@@ -115,6 +196,7 @@ app.put("/make-server-fecc689d/users/:id", async (c) => {
       email: user.email,
       name: user.name,
       phone: user.phone,
+      role: user.role,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     });
@@ -280,9 +362,67 @@ app.post("/make-server-fecc689d/bookings", async (c) => {
   }
 });
 
+app.get("/make-server-fecc689d/availability", async (c) => {
+  try {
+    const month = c.req.query("month"); // format: "2026-05"
+    if (!month) return c.json({ error: "Параметр month обязателен" }, 400);
+
+    const [year, mon] = month.split("-").map(Number);
+    const startDate = `${month}-01`;
+    const lastDay = new Date(year, mon, 0).getDate();
+    const endDate = `${month}-${String(lastDay).padStart(2, "0")}`;
+
+    const supabase = db.getSupabaseClient();
+
+    const { data: halls } = await supabase
+      .from("halls")
+      .select("id")
+      .eq("is_available", true);
+
+    const hallCount = halls?.length ?? 1;
+    const workingHoursPerDay = 14;
+    const capacityPerDay = hallCount * workingHoursPerDay;
+
+    const { data: bookings, error } = await supabase
+      .from("bookings")
+      .select("booking_date, duration_hours, status")
+      .gte("booking_date", startDate)
+      .lte("booking_date", endDate)
+      .neq("status", "cancelled");
+
+    if (error) throw new Error(error.message);
+
+    const bookedByDay: Record<string, number> = {};
+    for (const b of bookings ?? []) {
+      const d = b.booking_date.slice(0, 10);
+      bookedByDay[d] = (bookedByDay[d] ?? 0) + (b.duration_hours ?? 0);
+    }
+
+    const result: Record<string, { booked: number; capacity: number; status: string }> = {};
+    for (let day = 1; day <= lastDay; day++) {
+      const dateStr = `${month}-${String(day).padStart(2, "0")}`;
+      const booked = bookedByDay[dateStr] ?? 0;
+      let status = "free";
+      if (booked >= capacityPerDay) status = "full";
+      else if (booked > 0) status = "partial";
+      result[dateStr] = { booked, capacity: capacityPerDay, status };
+    }
+
+    return c.json(result);
+  } catch (error: any) {
+    console.error("Availability error:", error);
+    return c.json({ error: error?.message || "Ошибка при получении доступности" }, 500);
+  }
+});
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 app.get("/make-server-fecc689d/bookings/:id", async (c) => {
   try {
     const bookingId = c.req.param("id");
+    if (!UUID_RE.test(bookingId)) {
+      return c.json({ error: "Бронирование не найдено" }, 404);
+    }
     const booking = await db.getBookingById(bookingId);
 
     if (!booking) {
@@ -364,6 +504,7 @@ app.get("/make-server-fecc689d/bookings", async (c) => {
 app.put("/make-server-fecc689d/bookings/:id", async (c) => {
   try {
     const bookingId = c.req.param("id");
+    if (!UUID_RE.test(bookingId)) return c.json({ error: "Бронирование не найдено" }, 404);
     const updates = await c.req.json();
 
     // Получаем текущее бронирование
@@ -441,6 +582,7 @@ app.put("/make-server-fecc689d/bookings/:id", async (c) => {
 app.delete("/make-server-fecc689d/bookings/:id", async (c) => {
   try {
     const bookingId = c.req.param("id");
+    if (!UUID_RE.test(bookingId)) return c.json({ error: "Бронирование не найдено" }, 404);
 
     // Получаем бронирование чтобы удалить событие из календаря
     const booking = await db.getBookingById(bookingId);
@@ -464,6 +606,7 @@ app.delete("/make-server-fecc689d/bookings/:id", async (c) => {
     return c.json({ error: error?.message || "Ошибка при удалении бронирования" }, 500);
   }
 });
+
 
 // ============= REPORTS ENDPOINTS =============
 

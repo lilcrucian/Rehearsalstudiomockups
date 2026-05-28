@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { Login as LoginIcon } from "@mui/icons-material";
 import { authAPI } from "../../utils/api";
-import { saveCurrentUser } from "../../utils/auth";
+import { saveCurrentUser, fetchRoleFromDB } from "../../utils/auth";
 
 export function Login() {
   const navigate = useNavigate();
@@ -29,7 +29,9 @@ export function Login() {
     try {
       setLoading(true);
       const user = await authAPI.login(email, password);
-      saveCurrentUser(user);
+      // Fetch role directly from Supabase DB (bypasses Edge Function caching)
+      const role = await fetchRoleFromDB(user.id);
+      saveCurrentUser({ ...user, role });
       navigate("/booking");
     } catch (err: any) {
       setError(err.message || "Ошибка при входе");

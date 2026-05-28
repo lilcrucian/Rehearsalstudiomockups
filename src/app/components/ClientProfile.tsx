@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -13,9 +13,11 @@ import {
   ListItem,
   ListItemText,
   CircularProgress,
-  Grid
+  Grid,
+  IconButton,
+  Tooltip
 } from "@mui/material";
-import { Person, Email, Phone, Edit, Save } from "@mui/icons-material";
+import { Person, Email, Phone, Edit, Save, CameraAlt } from "@mui/icons-material";
 import { userAPI, bookingAPI, type Booking } from "../../utils/api";
 import { getCurrentUser, saveCurrentUser } from "../../utils/auth";
 
@@ -24,10 +26,14 @@ export function ClientProfile() {
   const currentUser = getCurrentUser();
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [profile, setProfile] = useState({
     name: "",
     email: "",
     phone: "",
+    role: "" as string,
     memberSince: ""
   });
   const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
@@ -40,17 +46,59 @@ export function ClientProfile() {
 
     loadProfile();
     loadBookings();
+    loadAvatar();
   }, []);
+
+  const avatarKey = `avatar_${currentUser?.id}`;
+
+  const loadAvatar = () => {
+    const saved = localStorage.getItem(avatarKey);
+    if (saved) setAvatarUrl(saved);
+  };
+
+  const handleAvatarClick = () => fileInputRef.current?.click();
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+    if (!file.type.startsWith('image/')) return;
+
+    setAvatarUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      // Resize to max 256px to keep localStorage size manageable
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX = 256;
+        const ratio = Math.min(MAX / img.width, MAX / img.height, 1);
+        canvas.width = img.width * ratio;
+        canvas.height = img.height * ratio;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const resized = canvas.toDataURL('image/jpeg', 0.85);
+        localStorage.setItem(avatarKey, resized);
+        setAvatarUrl(resized);
+        setAvatarUploading(false);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const loadProfile = async () => {
     if (!currentUser) return;
 
     try {
       const userData = await userAPI.getUser(currentUser.id);
+      // Сохраняем свежие данные в localStorage (включая role)
+      saveCurrentUser(userData);
       setProfile({
         name: userData.name,
         email: userData.email,
         phone: userData.phone,
+        role: userData.role,
         memberSince: userData.createdAt ? new Date(userData.createdAt).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) : ''
       });
     } catch (error) {
@@ -95,13 +143,53 @@ export function ClientProfile() {
         <CardContent sx={{ p: 4 }}>
           <Box className="flex items-center justify-between mb-6">
             <Box className="flex items-center gap-4">
-              <Avatar sx={{ width: 80, height: 80, bgcolor: '#757575' }}>
-                <Person sx={{ fontSize: 48 }} />
-              </Avatar>
+              <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                <Avatar
+                  src={avatarUrl ?? undefined}
+                  sx={{ width: 80, height: 80, bgcolor: '#757575', cursor: 'pointer' }}
+                  onClick={handleAvatarClick}
+                >
+                  {!avatarUrl && <Person sx={{ fontSize: 48 }} />}
+                </Avatar>
+                <Tooltip title="Загрузить фото">
+                  <IconButton
+                    size="small"
+                    onClick={handleAvatarClick}
+                    disabled={avatarUploading}
+                    sx={{
+                      position: 'absolute', bottom: -4, right: -4,
+                      bgcolor: '#757575', color: '#fff', width: 28, height: 28,
+                      '&:hover': { bgcolor: '#616161' },
+                      '&.Mui-disabled': { bgcolor: '#bdbdbd' },
+                    }}
+                  >
+                    {avatarUploading
+                      ? <CircularProgress size={14} sx={{ color: '#fff' }} />
+                      : <CameraAlt sx={{ fontSize: 16 }} />}
+                  </IconButton>
+                </Tooltip>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={handleFileChange}
+                />
+              </Box>
               <Box>
                 <Typography variant="h5">{profile.name}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Участник с {profile.memberSince}
+                </Typography>
+                <Typography variant="caption" sx={{
+                  display: 'inline-block',
+                  mt: 0.5, px: 1, py: 0.25, borderRadius: 1,
+                  bgcolor: profile.role === 'admin' ? '#424242' : '#e0e0e0',
+                  color: profile.role === 'admin' ? '#fff' : '#616161',
+                  fontWeight: 600, letterSpacing: 0.5,
+                  textTransform: 'uppercase', fontSize: '0.65rem',
+                }}>
+                  {profile.role || 'загрузка...'}
                 </Typography>
               </Box>
             </Box>

@@ -8,6 +8,7 @@ export interface User {
   name: string;
   phone: string;
   password_hash: string;
+  role: 'client' | 'admin';
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +71,7 @@ export async function createUser(data: {
       name: data.name,
       phone: data.phone,
       password_hash: data.password, // TODO: hash password
+      role: 'client',
     })
     .select()
     .single();
@@ -211,7 +213,11 @@ export async function createBooking(data: {
   };
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function getBookingById(id: string): Promise<BookingWithDetails | null> {
+  if (!UUID_RE.test(id)) return null;
+
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase

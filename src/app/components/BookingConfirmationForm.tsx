@@ -93,7 +93,8 @@ export function BookingConfirmationForm() {
   }
 
   const totalPrice = hall.pricePerHour * bookingData.duration;
-  const endTime = `${parseInt(bookingData.time.split(':')[0]) + bookingData.duration}:${bookingData.time.split(':')[1]}`;
+  const startHour = parseInt(bookingData.time.split(':')[0]);
+  const endTime = `${String(startHour + bookingData.duration).padStart(2, '0')}:00`;
 
   return (
     <Box className="max-w-2xl mx-auto">

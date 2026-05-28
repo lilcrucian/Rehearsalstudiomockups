@@ -4,7 +4,19 @@ import { projectId, publicAnonKey } from '/utils/supabase/info';
 const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-fecc689d`;
 const API_KEY = publicAnonKey;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
+  // Guard: only block /bookings/{id} where id is not a UUID and not a known sub-path
+  const bookingMatch = endpoint.match(/\/bookings\/([^/?]+)$/);
+  if (bookingMatch) {
+    const seg = bookingMatch[1];
+    const knownPaths = ['user', 'availability'];
+    if (!knownPaths.includes(seg) && !UUID_RE.test(seg)) {
+      throw new Error('Бронирование не найдено');
+    }
+  }
+
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers: {
@@ -29,6 +41,7 @@ export interface User {
   email: string;
   name: string;
   phone: string;
+  role: 'client' | 'admin';
   createdAt?: string;
 }
 
@@ -103,6 +116,14 @@ export const userAPI = {
       body: JSON.stringify(updates),
     });
   },
+
+  async uploadAvatar(_userId: string, _base64: string, _mimeType: string): Promise<{ url: string }> {
+    return { url: '' }; // handled via localStorage
+  },
+
+  async getAvatarUrl(_userId: string): Promise<{ url: string | null }> {
+    return { url: null }; // handled via localStorage
+  },
 };
 
 // ============= Hall API =============
@@ -157,6 +178,20 @@ export const bookingAPI = {
     return fetchAPI(`/bookings/${bookingId}`, {
       method: 'DELETE',
     });
+  },
+};
+
+// ============= Availability API =============
+
+export interface DayAvailability {
+  booked: number;
+  capacity: number;
+  status: 'free' | 'partial' | 'full';
+}
+
+export const availabilityAPI = {
+  async getMonthAvailability(month: string): Promise<Record<string, DayAvailability>> {
+    return fetchAPI(`/availability?month=${month}`);
   },
 };
 
