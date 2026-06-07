@@ -92,8 +92,8 @@ export function ClientProfile() {
 
     try {
       const userData = await userAPI.getUser(currentUser.id);
-      // Сохраняем свежие данные в localStorage (включая role)
-      saveCurrentUser(userData);
+      // Preserve role from stored user if server doesn't return it
+      saveCurrentUser({ ...userData, role: userData.role ?? currentUser.role });
       setProfile({
         name: userData.name,
         email: userData.email,
@@ -130,7 +130,7 @@ export function ClientProfile() {
         phone: profile.phone
       });
 
-      saveCurrentUser(updatedUser);
+      saveCurrentUser({ ...updatedUser, role: updatedUser.role ?? currentUser.role });
       setEditing(false);
     } catch (error) {
       console.error("Error updating profile:", error);

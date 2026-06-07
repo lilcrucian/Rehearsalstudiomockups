@@ -66,13 +66,16 @@ export function BookingConfirmationForm() {
       setLoading(true);
       setError("");
 
+      const peopleNote = bookingData.people ? `Количество человек: ${bookingData.people}` : '';
+      const fullNotes = [peopleNote, notes].filter(Boolean).join('\n');
+
       const booking = await bookingAPI.createBooking({
         userId: currentUser.id,
         hallId: bookingData.hallId,
         bookingDate: bookingData.date,
         startTime: bookingData.time,
         durationHours: bookingData.duration,
-        notes
+        notes: fullNotes
       });
 
       sessionStorage.removeItem('pendingBooking');
@@ -163,6 +166,16 @@ export function BookingConfirmationForm() {
                 secondaryTypographyProps={{ variant: 'body1', color: 'text.primary' }}
               />
             </ListItem>
+            {bookingData.people && (
+              <ListItem key="confirm-people" sx={{ px: 0, py: 1 }}>
+                <ListItemText
+                  primary="Количество человек"
+                  secondary={`${bookingData.people} чел.`}
+                  primaryTypographyProps={{ variant: 'body2', color: 'text.secondary' }}
+                  secondaryTypographyProps={{ variant: 'body1', color: 'text.primary' }}
+                />
+              </ListItem>
+            )}
           </List>
 
           <Divider sx={{ my: 3 }} />

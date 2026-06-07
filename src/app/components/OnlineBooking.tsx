@@ -53,6 +53,7 @@ export function OnlineBooking() {
   const [duration, setDuration] = useState(2);
   const [occupiedHours, setOccupiedHours] = useState<Set<number>>(new Set());
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [people, setPeople] = useState(1);
 
   useEffect(() => {
     if (!currentUser) { navigate("/"); return; }
@@ -97,7 +98,7 @@ export function OnlineBooking() {
 
   const handleBooking = () => {
     if (selectedHall && date && time && currentUser) {
-      sessionStorage.setItem('pendingBooking', JSON.stringify({ hallId: selectedHall, date, time, duration }));
+      sessionStorage.setItem('pendingBooking', JSON.stringify({ hallId: selectedHall, date, time, duration, people }));
       navigate("/booking-confirm");
     }
   };
@@ -167,6 +168,22 @@ export function OnlineBooking() {
                 </Typography>
                 <InteractiveCalendar selectedDate={date} onDateSelect={setDate} />
               </Box>
+
+              <FormControl fullWidth margin="normal" disabled={!selectedHall}>
+                <InputLabel>Количество человек</InputLabel>
+                <Select
+                  value={people}
+                  onChange={(e) => setPeople(Number(e.target.value))}
+                  label="Количество человек"
+                >
+                  {Array.from(
+                    { length: halls.find(h => h.id === selectedHall)?.capacity || 10 },
+                    (_, i) => i + 1
+                  ).map(n => (
+                    <MenuItem key={n} value={n}>{n} {n === 1 ? 'человек' : n < 5 ? 'человека' : 'человек'}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
 
               <FormControl fullWidth margin="normal" disabled={!selectedHall}>
                 <InputLabel>Длительность</InputLabel>

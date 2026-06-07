@@ -89,17 +89,75 @@ export interface Statistics {
 
 export const authAPI = {
   async register(data: { email: string; password: string; name: string; phone: string }): Promise<User> {
-    return fetchAPI('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    // Direct Supabase REST API call to bypass Edge Function cache
+    const response = await fetch(
+      `https://${projectId}.supabase.co/rest/v1/users?select=*`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': publicAnonKey,
+          'Authorization': `Bearer ${publicAnonKey}`,
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify({
+          email: data.email,
+          password_hash: data.password,
+          name: data.name,
+          phone: data.phone,
+          role: 'client',
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Ошибка при регистрации' }));
+      throw new Error(error.message || error.hint || 'Ошибка при регистрации');
+    }
+
+    const [user] = await response.json();
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.created_at,
+    };
   },
 
   async login(email: string, password: string): Promise<User> {
-    return fetchAPI('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
+    // Direct Supabase REST API call to bypass Edge Function cache
+    const response = await fetch(
+      `https://${projectId}.supabase.co/rest/v1/users?select=*&email=eq.${encodeURIComponent(email)}&password_hash=eq.${encodeURIComponent(password)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': publicAnonKey,
+          'Authorization': `Bearer ${publicAnonKey}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Ошибка при входе');
+    }
+
+    const users = await response.json();
+    if (!users || users.length === 0) {
+      throw new Error('Неверный email или пароль');
+    }
+
+    const user = users[0];
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.created_at,
+    };
   },
 };
 

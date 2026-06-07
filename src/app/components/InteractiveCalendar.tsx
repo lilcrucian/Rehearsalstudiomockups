@@ -1,40 +1,29 @@
 import { useState, useEffect } from "react";
 import { Box, Typography, IconButton, CircularProgress, Tooltip } from "@mui/material";
 import { ChevronLeft, ChevronRight } from "@mui/icons-material";
-import { projectId, publicAnonKey } from '/utils/supabase/info';
-import type { DayAvailability } from "../../utils/api";
+import { hallAPI, bookingAPI, type DayAvailability } from "../../utils/api";
 
-// Query Supabase REST API directly — bypasses Edge Function entirely
 async function fetchAvailability(month: string): Promise<Record<string, DayAvailability>> {
   const [year, mon] = month.split("-").map(Number);
   const lastDay = new Date(year, mon, 0).getDate();
-  const startDate = `${month}-01`;
-  const endDate = `${month}-${String(lastDay).padStart(2, "0")}`;
 
-  const headers = {
-    apikey: publicAnonKey,
-    Authorization: `Bearer ${publicAnonKey}`,
-  };
-  const base = `https://${projectId}.supabase.co/rest/v1`;
-
-  const [hallsRes, bookingsRes] = await Promise.all([
-    fetch(`${base}/halls?select=id&is_available=eq.true`, { headers }),
-    fetch(`${base}/bookings?select=booking_date,duration_hours,status&booking_date=gte.${startDate}&booking_date=lte.${endDate}&status=neq.cancelled`, { headers }),
+  const [halls, bookings] = await Promise.allSettled([
+    hallAPI.getAllHalls(),
+    bookingAPI.getAllBookings(),
   ]);
 
-  const halls = await hallsRes.json();
-  const bookings = await bookingsRes.json();
+  const hallList = halls.status === 'fulfilled' ? halls.value : [];
+  const bookingList = bookings.status === 'fulfilled' ? bookings.value : [];
 
-  const hallCount = Array.isArray(halls) ? halls.length : 1;
-  const workingHoursPerDay = 14;
-  const capacityPerDay = hallCount * workingHoursPerDay;
+  const hallCount = hallList.filter(h => h.isAvailable).length || 1;
+  const capacityPerDay = hallCount * 14;
 
   const bookedByDay: Record<string, number> = {};
-  if (Array.isArray(bookings)) {
-    for (const b of bookings) {
-      const d = (b.booking_date as string).slice(0, 10);
-      bookedByDay[d] = (bookedByDay[d] ?? 0) + (b.duration_hours ?? 0);
-    }
+  for (const b of bookingList) {
+    if (b.status === 'cancelled') continue;
+    const d = b.bookingDate.slice(0, 10);
+    if (!d.startsWith(month)) continue;
+    bookedByDay[d] = (bookedByDay[d] ?? 0) + (b.durationHours ?? 0);
   }
 
   const result: Record<string, DayAvailability> = {};
@@ -87,8 +76,8 @@ export function InteractiveCalendar({ selectedDate, onDateSelect }: Props) {
     try {
       const data = await fetchAvailability(toMonthStr(viewYear, viewMonth));
       setAvailability(data);
-    } catch (e) {
-      console.error("Calendar availability error:", e);
+    } catch {
+      // silently ignore — calendar renders without colour coding
     } finally {
       setLoading(false);
     }
